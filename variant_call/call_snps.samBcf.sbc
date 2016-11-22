@@ -49,40 +49,15 @@ S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
 >S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf.gz
 # polyploidy call, not working, because samtools can only call
 # diploid/haploid genomes
-bcftools call -mv -Oz -S S2_sample_info.tsv --ploidy-file S2_ploid.tsv
-S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
->S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.tetraploid.vcf.gz
-
-# let's train the model with GATK
-java -Xmx18g -jar $gatkJar -T VariantRecalibrator -R
-/home/zzhang65/scratch/tmpdata/NGS/bowtie2_index/dmel_r5.genome.fa
--input S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf
--recalFile S2_DNA.recal -tranchesFile S2_DNA.tranches -nt 4
--resource:dgrp2,known=false,training=true,truth=true,prior=12
-../dgrp2.sites.sorted.vcf -an DP -an VDB -an SGB  -an MQSB -an MQ
--mode SNP
-# filter with the model
-java -Xmx18g -jar $gatkJar -T ApplyRecalibration -R
-$BOWTIE2_INDEXES/dmel_r5.genome.fa -input
-S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf -recalFile
-S2_DNA.recal -tranchesFile S2_DNA.tranches -mode SNP -o
-S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.VQSR90.vcf
---ts_filter_level 90
+#bcftools call -mv -Oz -S S2_sample_info.tsv --ploidy-file S2_ploid.tsv
+#S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
+#>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.tetraploid.vcf.gz
 
 # hard filter
-bcftools filter -sLowQual -g3 -G10 -e'%QUAL<20 || (RPB<0.1 &&
-%QUAL<15) || (AC<2 && %QUAL<15) '
-%S2_DNA_bowtie2.q20_sorted_dupMarked_realigned_BQSR.vcf >tmp.vcf
-
 bcftools filter -sLowQual -g3 -G10 -e '%QUAL <20 || (RPB < 0.1 &&
 %QUAL < 15) || (DP < 2 && %QUAL < 15) || (MQ < 30 && %QUAL < 15)'
 %S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf.gz
 %>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.hard_filter.vcf.gz
-
-#6. filter variants
-# let's use Variant Quality Score Recalibration, other than hard
-# filtering
-# run recalibration
 
 wait
 
