@@ -1,0 +1,92 @@
+#!/bin/bash
+
+#SBATCH -p standard
+#SBATCH -o logs/rg_sort.%j.out
+#SBATCH -e logs/rg_sort.%j.err
+#SBATCH -n 1
+#SBATCH -t 16:00:00
+#SBATCH -c 12
+#SBATCH --mem=48G
+#SBATCH --mail-type=ALL
+##SBATCH -N 2
+
+NT=${SLURM_CPUS_PER_TASK:-1} # number of threads, default is 1
+module load samtools # need versions 1.3 or higher
+module unload java # only jdk version 1.8.0_91 works
+module load gatk # appropriate java is also loaded
+
+## here we call variants using samtools and bcftools pipeline
+
+echo Started at `date`
+bamFile=$1;
+rgFile=$2;
+
+if [[ -z $bamFile || -z $rgFile ]]; then
+	echo "Usage: $0 <bam-file> <read-group-file>"
+	exit 1;
+fi
+
+outFile=${bamFile/%bam/q20_sorted.bam};
+
+# remove duplicates first
+samtools view -F 0x400 -b -@ 4
+../bamFiles/DNA/bowtie2/S2_DNA_bowtie2.q20_sorted_dupMarked_realigned_BQSR.bam
+>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bam
+
+# create mpileup file
+samtools mpileup -g -f $BOWTIE2_INDEXES/dmel_r5.genome.fa -t
+AD,INFO/AD,INFO/DPR,SP -Q 20
+S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bam
+>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
+
+#samtools mpileup -g -f $BOWTIE2_INDEXES/dmel_r5.genome.fa
+#../bamFiles/DNA/bowtie2/S2_DNA_bowtie2.q20_sorted_dupMarked_realigned_BQSR.bam
+#>S2_DNA_bowtie2.q20_sorted_dupMarked_realigned_BQSR.bcf
+
+# diploidy call
+bcftools call -mv -Oz
+S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
+>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf.gz
+# polyploidy call, not working, because samtools can only call
+# diploid/haploid genomes
+bcftools call -mv -Oz -S S2_sample_info.tsv --ploidy-file S2_ploid.tsv
+S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.bcf
+>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.tetraploid.vcf.gz
+
+# let's train the model with GATK
+java -Xmx18g -jar $gatkJar -T VariantRecalibrator -R
+/home/zzhang65/scratch/tmpdata/NGS/bowtie2_index/dmel_r5.genome.fa
+-input S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf
+-recalFile S2_DNA.recal -tranchesFile S2_DNA.tranches -nt 4
+-resource:dgrp2,known=false,training=true,truth=true,prior=12
+../dgrp2.sites.sorted.vcf -an DP -an VDB -an SGB  -an MQSB -an MQ
+-mode SNP
+# filter with the model
+java -Xmx18g -jar $gatkJar -T ApplyRecalibration -R
+$BOWTIE2_INDEXES/dmel_r5.genome.fa -input
+S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf -recalFile
+S2_DNA.recal -tranchesFile S2_DNA.tranches -mode SNP -o
+S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.VQSR90.vcf
+--ts_filter_level 90
+
+# hard filter
+bcftools filter -sLowQual -g3 -G10 -e'%QUAL<20 || (RPB<0.1 &&
+%QUAL<15) || (AC<2 && %QUAL<15) '
+%S2_DNA_bowtie2.q20_sorted_dupMarked_realigned_BQSR.vcf >tmp.vcf
+
+bcftools filter -sLowQual -g3 -G10 -e '%QUAL <20 || (RPB < 0.1 &&
+%QUAL < 15) || (DP < 2 && %QUAL < 15) || (MQ < 30 && %QUAL < 15)'
+%S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.vcf.gz
+%>S2_DNA_bowtie2.q20_sorted_noDup_realigned_BQSR.hard_filter.vcf.gz
+
+#6. filter variants
+# let's use Variant Quality Score Recalibration, other than hard
+# filtering
+# run recalibration
+
+wait
+
+echo Ended at `date`
+
+exit 0;
+

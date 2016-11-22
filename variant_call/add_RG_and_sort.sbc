@@ -1,0 +1,39 @@
+#!/bin/bash
+
+#SBATCH -p standard
+#SBATCH -o logs/rg_sort.%j.out
+#SBATCH -e logs/rg_sort.%j.err
+#SBATCH -n 1
+#SBATCH -t 16:00:00
+#SBATCH -c 12
+#SBATCH --mem=48G
+#SBATCH --mail-type=ALL
+##SBATCH -N 2
+
+NT=$SLURM_CPUS_PER_TASK # number of threads
+module load samtools # need versions 1.3 or higher
+
+echo Started at `date`
+bamFile=$1;
+rgFile=$2;
+
+if [[ -z $bamFile || -z $rgFile ]]; then
+	echo "Usage: $0 <bam-file> <read-group-file>"
+	exit 1;
+fi
+
+outFile=${bamFile/%bam/q20_sorted.bam};
+
+#echo $outFile, $rgFile; exit 0;
+
+# add read group info and sort it, this process also removed
+# low-quality mapped reads by seting -q 20
+samtools view -h -q 20 $bamFile | add_read_group.pl --rg-name -h $rgFile - | \
+samtools sort -m 3G -@ $NT -O BAM -o $outFile
+
+wait
+
+echo Ended at `date`
+
+exit 0;
+

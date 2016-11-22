@@ -28,6 +28,14 @@ while(<H>)
 }
 close H;
 
+if($rgFromName)
+{
+	warn "#INFO: Read groups will be parsed from read name\n";
+}else
+{
+	warn "#INFO: The string '$rgID' will be used as RG tag for all reads\n";
+}
+
 open(IN, "< $inFile") or die "Cannot open $inFile:$!";
 my $counter = 0;
 while(<IN>)

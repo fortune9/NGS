@@ -1,0 +1,94 @@
+#!/bin/bash
+
+#SBATCH -p standard
+#SBATCH -o logs/dup_realign_BQSR.%j.out
+#SBATCH -e logs/dup_realign_BQSR.%j.err
+#SBATCH -n 1
+#SBATCH -t 16:00:00
+#SBATCH -c 12
+#SBATCH --mem=48G
+#SBATCH --mail-type=ALL
+##SBATCH -N 2
+
+mem=${SLURM_MEM_PER_NODE:-4G}m
+mem=${mem/%Gm/G};
+
+NT=${SLURM_CPUS_PER_TASK:-1} # number of threads, default is 1
+
+module load samtools # need versions 1.3 or higher
+module unload jre
+module load picard gatk
+
+genome=dmel_r5.genome
+knownVar=../../../dgrp2.sites.sorted.vcf
+
+echo Started at `date`
+bamFile=$1;
+
+if [[ -z $bamFile ]]; then
+	echo "Usage: $0 <bam-file>"
+	echo "This script does the following three tasks:"
+	echo 1. Mark read duplicates using picard
+	echo 2. Realign reads around indel using GATK
+	echo 3. Recalibrate base-quality score using GATK
+	exit 1;
+fi
+
+
+echo Step 1. index input bamfile
+samtools index $bamFile
+
+echo Step 2. mark duplicated reads
+out=${bamFile/%.bam/_dupMarked.bam}
+java -Xmx$mem -jar $picardJar MarkDuplicates \
+I=$bamFile O=$out M=dedupedReads.txt
+## index the bam file
+samtools index $out;
+
+echo Step 3. realign reads near indels
+#3.1 mark intervals
+in=$out
+out1=${in/%.bam/.realign_intervals}
+out2=${in/%.bam/_realigned.bam}
+java -Xmx$mem -jar $gatkJar -nt $NT -T RealignerTargetCreator \
+-R $BOWTIE2_INDEXES/$genome.fa -I $in -o $out1
+#3.2 do real alignment
+tmpFile=tmp.$$.intervals;
+cp $out1 $tmpFile; # GATK need the extension .intervals 
+java -Xmx$mem -jar $gatkJar -T IndelRealigner \
+-R $BOWTIE2_INDEXES/$genome.fa -I $in -targetIntervals $tmpFile -o $out2
+rm $tmpFile
+
+echo "Step 4. Base Quality Score Recalibration (BQSR)"
+## use the DGRP data to mask known SNP sites
+## train the model
+in=$out2
+java -Xmx$mem -jar $gatkJar -T BaseRecalibrator -R \
+$BOWTIE2_INDEXES/$genome.fa -knownSites $knownVar \
+-I $in -o BQSR_recal_data.table
+
+## a second pass to analyze the remaining covariation after
+## recalibration, this is optional, but to see recalibration effect,
+## this step is necessary.
+java -Xmx$mem -jar $gatkJar -T BaseRecalibrator -R \
+$BOWTIE2_INDEXES/$genome.fa -knownSites $knownVar \
+-I $in -BQSR BQSR_recal_data.table -o BQSR_recal_data.2nd_pass.table
+
+## make a plot to see the recalibration effect
+java -Xmx$mem -jar $gatkJar -T AnalyzeCovariates -R \
+$BOWTIE2_INDEXES/$genome.fa -before BQSR_recal_data.table \
+-after BQSR_recal_data.2nd_pass.table -plots BQSR_plots.pdf
+
+## apply the recalibration
+out=${in/%.bam/_BQSR.bam}
+java -Xmx$mem -jar $gatkJar -T PrintReads -R \
+$BOWTIE2_INDEXES/$genome.fa -I $in -BQSR BQSR_recal_data.table \
+-o $out
+
+wait
+
+echo "Work is done!"
+
+echo Ended at `date`
+
+exit 0;

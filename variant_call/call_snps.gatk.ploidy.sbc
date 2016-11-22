@@ -1,0 +1,102 @@
+#!/bin/bash
+
+#SBATCH -p standard
+#SBATCH -o logs/gatk_call.%j.out
+#SBATCH -e logs/gatk_call.%j.err
+#SBATCH -n 1
+#SBATCH -t 16:00:00
+#SBATCH -c 12
+#SBATCH --mem=48G
+#SBATCH --mail-type=ALL
+##SBATCH -N 2
+
+# in this script, we consider the ploidy information
+# here for S2 cells, autosomes are tetraploidy and X are diploidy
+
+mem=${SLURM_MEM_PER_NODE:-4G}m
+mem=${mem/%Gm/G};
+echo $mem
+NT=${SLURM_CPUS_PER_TASK:-1} # number of threads, default is 1
+module load samtools # need versions 1.3 or higher
+module unload jre # only jdk version 1.8.0_91 works
+module load gatk # appropriate java is also loaded
+
+echo Started at `date`
+genome=dmel_r5.genome
+knownVar=../../dgrp2.sites.sorted.vcf
+bamFile=$1;
+ST=${2:-90}; # final variant call sensitity in VQSR model
+
+if [[ -z $bamFile ]]; then
+	echo "Usage: $0 <bam-file> [<sensitivity>]"
+	echo This script call variants using GATK in three steps:
+	echo 1. call variants with GATK
+	echo 2. filter variants using VQSR model
+	echo 3. filter variants using hard criteria given by GATKforum
+	echo "<sensitivity> is the call sensitivity in VQSR model, default"
+	echo is 90, i.e, 90%.
+	echo Note: this script only calls SNPs
+	exit 1;
+fi
+
+echo Step 1: call variants using GATK
+#!! note, jre's java not work,
+# /software/jdk/1.8.0_91/bin/java works
+# call variants for X chromosome first
+in=$bamFile
+out=`basename $in`
+outX=${out/%bam/HC.X.vcf}
+java -Xmx$mem -jar $gatkJar -T HaplotypeCaller \
+-R $BOWTIE2_INDEXES/$genome.fa -I $in -o $outX \
+-stand_call_conf 30 -stand_emit_conf 10 -minPruning 3 \
+--genotyping_mode DISCOVERY -L X -L XHet -ploidy 2
+# call variants for autosomes now
+outA=${out/%bam/HC.A.vcf}
+java -Xmx$mem -jar $gatkJar -T HaplotypeCaller \
+-R $BOWTIE2_INDEXES/$genome.fa -I $in -o $outA \
+-stand_call_conf 30 -stand_emit_conf 10 -minPruning 3 \
+--genotyping_mode DISCOVERY -XL X -XL XHet -ploidy 4
+# now concatenate two VCF files
+out=${out/%bam/HC.vcf}
+java -Xmx$mem -cp $gatkJar org.broadinstitute.gatk.tools.CatVariants \
+-R $BOWTIE2_INDEXES/$genome.fa -V $outX -V outA -out $out
+
+echo Step 2: filter variants "(SNPs only)" using VQSR
+# train the model
+# Don't use -an FS, otherwise it will fail due to little variation in
+# this FS parameter
+in=$out
+java -Xmx$mem -jar $gatkJar -T VariantRecalibrator -R \
+$BOWTIE2_INDEXES/$genome.fa -input $in -recalFile \
+S2_DNA.recal -tranchesFile S2_DNA.tranches -nt $NT \
+-resource:dgrp2,known=false,training=true,truth=true,prior=12 \
+$knownVar -an QD -an MQ -an MQRankSum -an ReadPosRankSum \
+-an DP -mode SNP --badLodCutoff -5.0
+
+# now apply recaliberation
+## 90% sensitivity or given by the user
+out=${in/%vcf/VQSR$TS.vcf}
+java -Xmx$mem -jar $gatkJar -T ApplyRecalibration -R \
+$BOWTIE2_INDEXES/$genome.fa -input $in -o $out \
+-recalFile S2_DNA.recal -tranchesFile S2_DNA.tranches -mode SNP \
+--ts_filter_level $TS
+
+echo Step 3: hard filter variants "(SNPs only)" using guide by GATK forum
+out=${in/%vcf/hard_filter.vcf}
+# select SNPs first
+java -Xmx$mem -jar $gatkJar -T SelectVariants -R \
+$BOWTIE2_INDEXES/$genome.fa -V $in -selectType SNP \
+-o $out.tmp
+# filter now
+java -Xmx$mem -jar $gatkJar -T VariantFiltration -R \
+$BOWTIE2_INDEXES/$genome.fa -V $out.tmp -o $out \
+--filterExpression "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0" \
+-filterName "hard_filter"
+rm $out.tmp*
+
+wait
+
+echo Ended at `date`
+
+exit 0;
+
