@@ -1,0 +1,5 @@
+ref	target
+testes:dsim	testes:dyak
+#ovary:dsim	ovary:dyak
+#female_headless_carcass:dsim	female_headless_carcass:dyak
+male_headless_carcass:dsim	male_headless_carcass:dyak

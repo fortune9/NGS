@@ -1,0 +1,21 @@
+# one can use '#' to start comments, which will be ignored by the
+# program, the 'param' names are also case-insensitive
+param	val
+# file names
+gene-loc-file:dmel	/home/zzhang65/scratch/database/FlyBase/ftp/releases/FB2014_03/dmel_r5.57/gff/gene_location.tsv
+gene-loc-file:dsim	/home/zzhang65/scratch/database/FlyBase/ftp/releases/FB2016_02/dsim_r2.02/gff/gene_location.tsv
+gene-loc-file:dyak	/home/zzhang65/scratch/database/FlyBase/ftp/releases/FB2014_03/dyak_r1.3/gff/gene_location.tsv
+gene-len-file:dmel	/home/zzhang65/scratch/tmpdata/NGS/gff/dmel_r5.57.CDS_exons_homo_to_dsim2_or_dyak1.gene_len.tsv
+gene-len-file:dsim	/home/zzhang65/scratch/tmpdata/NGS/gff/dsim_r2.02.CDS_exons_homo_to_dmel5_or_dyak1.gene_len.tsv
+gene-len-file:dyak	/home/zzhang65/scratch/tmpdata/NGS/gff/dyak_r1.3.CDS_exons_homo_to_dmel5_or_dsim2.gene_len.tsv
+ortholog-file	/home/zzhang65/scratch/database/FlyBase/ftp/releases/FB2014_03/orthogroups.1to1.dmel_dsim_dyak.tsv
+outbase	dsim2_dyak1.exp_divergence
+# DESeq parameters
+# DESeq	TRUE
+DESeq2	TRUE
+#cmp_DESeqs	TRUE
+fitType	parametric
+fdr-threshold	0.01
+len-threshold	100
+normalize-by-autosome	TRUE
+quiet	TRUE # suppress library loading info
