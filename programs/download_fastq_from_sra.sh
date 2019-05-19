@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 if [[ $# -lt 1 ]]; then
 	cat << EOF
 Usage: $0 <SRR run-id> [<other fastq-dump options>]
@@ -25,18 +27,31 @@ EOF
 	exit 1;
 fi
 
-options="--gzip --read-filter pass --skip-technical --split-3 --clip"
+options="--skip-technical --split-3"
 
 if [[ $2 != '' ]]; then
 	options=${@:2}
 fi
 
-cmd="fastq-dump $options $1"
+dump='fastq-dump'
+
+if [[ $(command -v fasterq-dump) ]]; then
+	ncores=`nproc`
+	dump="fasterq-dump --threads $ncores"
+else
+	options+=" --gzip --read-filter pass --clip"
+fi
+
+cmd="$dump $options $1"
 
 echo "# Running command '$cmd' at `date`" >&2
 
 $cmd
 
+if [[ "$dump" != "fastq-dump" ]]; then
+	gzip -S .gz ${1}*.fastq; # need manual compression
+fi
+	
 echo "# Downloading $1 finished at `date`" >&2
 
 exit 0;
