@@ -57,7 +57,7 @@ EOF
 
 function msg
 {
-	echo "$*" >&2;
+	echo -e "$*" >&2;
 }
 
 # check whether a bam is coordinate sorted
@@ -69,6 +69,28 @@ function bam_sorted
 	else
 		echo "";
 	fi
+}
+
+# count the number of read pairs as well reads in a bam file
+function count_read_pairs
+{
+	bam=$1
+	# check whether all reads in paired mode
+	unpairedCnt=$(samtools view -c -F 0x1 $bam)
+	if [[ $unpairedCnt -gt 0 ]]; then
+		msg "There are unpaired reads in $bam. can't proceed"
+		exit 4;
+	fi
+	unmappedCnt=$(samtools view -c -f 0x4 $bam)
+	if [[ $unmappedCnt -gt 0 ]]; then
+		msg "There are unmapped reads in $bam. can't proceed"
+		exit 4;
+	fi
+	# get all reads (each name counts only once)
+	nReads=$(samtools view -c -F 0x100 $bam)
+	single=$(samtools view -c -F 0x100 -f 0x8 $bam)
+	nPairs=$(echo "scale=0; ($nReads-$single)/2+$single" | bc -l) # each pair counted only once
+	echo "$nPairs $nReads"
 }
 
 # check whether a command exists
@@ -104,7 +126,16 @@ if [[ $# -lt 1 ]]; then
 	exit 1;
 fi
 
-depends=(samtools picard)
+if [[ $(check_exe picard) ]]; then
+	picard='picard'
+elif [[ $(check_exe picard-tools) ]]; then
+	picard="picard-tools"
+else
+	msg "can't find picard or picard-tools in the system"
+	exit 2;
+fi
+
+depends=(samtools)
 for i in ${depends[@]}
 do
 	ok=$(check_exe $i);
@@ -179,7 +210,7 @@ seed=$$;
 
 # set default outbase
 if [[ ! $outBase ]]; then
-	outBase=$(basename ${bam/%.bam/.sub})
+	outBase=$(basename ${bam/%.bam/.sub}).$$
 fi
 
 if [[ ! $keepDup ]]; then
@@ -191,7 +222,7 @@ if [[ ! $keepDup ]]; then
 		mv tmp.$$.bam $bam
 		msg "$bam is coordinate-sorted now"
 	fi
-	picard MarkDuplicates \
+	$picard MarkDuplicates \
 	I=$bam ASO=coordinate M=$metric O=$markedBam \
 	OPTICAL_DUPLICATE_PIXEL_DISTANCE=100 TMP_DIR=. \
 	TAGGING_POLICY=All
@@ -200,7 +231,9 @@ if [[ ! $keepDup ]]; then
 	bam=$markedBam
 	tmpFiles+=($markedBam $markedBam.bai);
 fi
-
+# count the number of reads before filtering
+readCntOrig=($(count_read_pairs $bam)); # store in an array
+msg "[STAT] In original file: there are ${readCntOrig[1]} reads in ${readCntOrig[0]} pairs"
 # index the bam file
 samtools index $bam
 filterParams="";
@@ -232,6 +265,9 @@ if [[ $filterParams ]]; then
 	tmpFiles+=($o $o.bai)
 fi
 
+# count reads after filtering
+readCntFiltered=($(count_read_pairs $bam)); # store in an array
+msg "[STAT] In filtered file: there are ${readCntFiltered[1]} reads in ${readCntFiltered[0]} pairs"
 # now sub-sample the reads
 
 if [[ $(cmp_num $frac 1 ">") -gt 0 ]]; then
@@ -252,8 +288,20 @@ fi
 
 subfrac=$seed.$frac
 subBam=$outBase.bam
-msg "Sampling 0.$frac fraction reads from filtered bam"
+msg "[STAT] Sampling 0.$frac fraction reads from filtered bam"
 samtools view -@ $extraCpus -b -o $subBam -s $subfrac $bam
+msg "Final bam file is generated: $subBam"
+
+# count reads after filtering
+readCntSampled=($(count_read_pairs $subBam)); # store in an array
+msg "[STAT] In sampled file: there are ${readCntSampled[1]} reads in ${readCntSampled[0]} pairs"
+
+ratio1=$(echo "scale=4; ${readCntFiltered[1]}/${readCntOrig[1]}" | bc -l)
+ratio2=$(echo "scale=4; ${readCntFiltered[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
+msg "The filtered reads/pairs ratio (against the original): $ratio1\t$ratio2"
+ratio1=$(echo "scale=4; ${readCntSampled[1]}/${readCntOrig[1]}" | bc -l)
+ratio2=$(echo "scale=4; ${readCntSampled[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
+msg "The sampled reads/pairs ratio (against the original): $ratio1\t$ratio2"
 
 if [[ ! $keepTmp ]]; then # clean up
 	msg "Removing temporary files"
@@ -261,116 +309,6 @@ if [[ ! $keepTmp ]]; then # clean up
 fi
 
 msg "Job is done at `date`"
-
-exit 0;
-
-	metric=$alnDir/$id.dup_metrics.$sizeTag.$i.txt
-	samtools view -@ $extraCpus -b -o $subBam -s $subfrac $bam
-	samtools index $subBam
-	# estimate library size
-	picard EstimateLibraryComplexity I=$subBam O=$metric TMP_DIR=.
-	# count reads
-	chrMYCnt=$alnDir/${id}.reads_cnt.$sizeTag.$i.tsv
-	samtools idxstats $subBam >tmp1.$$.txt
-	echo -e "sample\tmappedCnt.all\tmappedCnt.chrM\tmappedCnt.chrY" >$chrMYCnt
-	chrMcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}$1~/^chrM[^\d]?/{s+=$3}END{print s}' )
-	chrYcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}$1~/^chrY[^\d]?/{s+=$3}END{print s}' )
-	allcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}{s+=$3}END{print s}' )
-	echo -e "$id\t$allcnt\t$chrMcnt\t$chrYcnt" >>$chrMYCnt
-
-size=5000000
-sizeTag=5m
-id=`basename ${bam%.bam}`
-if [[ $outBase ]]; then
-	id=$outBase
-fi
-s3dir=""
-species=hs
-
-alnDir=sub_aln.$$
-macsDir=sub_macs.$$
-mkdir -p $alnDir $macsDir
-
-echo Job started at `date`
-
-# preprocess bams
-if [[ "$dupMarked" == "T" ]]; then
-	echo The input has been dup-marked, so no more mark.
-else
-	echo "Step 0: Mark duplicates on $bam"
-	markedBam=$alnDir/${id}.dup_marked.bam
-	metric=$alnDir/${id}.dup_metrics.txt
-	samtools sort -m 2G -@ $extraCpus -o tmp.$$.bam $bam
-	mv tmp.$$.bam $bam
-	picard MarkDuplicates \
-	I=$bam ASO=coordinate M=$metric O=$markedBam \
-	OPTICAL_DUPLICATE_PIXEL_DISTANCE=100 TMP_DIR=. \
-	TAGGING_POLICY=All
-	#aws s3 cp --quiet $markedBam $s3dirOut/$markedBam
-	#aws s3 cp --quiet $metric $s3dirOut/$metric
-	bam=$markedBam
-fi
-
-# start sub-sampling and analyzing
-
-# get the fraction to sample
-echo Subsampling $frac fraction from $bam
-frac=${frac/#*\.}
-
-for i in `seq $numReps`
-do
-	echo "Step 1 (rep $i): sub-sample $size reads from $bam"
-	# use $i as seed
-	subfrac=$i.$frac
-	subBam=$alnDir/$id.$sizeTag.$i.bam
-	metric=$alnDir/$id.dup_metrics.$sizeTag.$i.txt
-	samtools view -@ $extraCpus -b -o $subBam -s $subfrac $bam
-	samtools index $subBam
-	# estimate library size
-	picard EstimateLibraryComplexity I=$subBam O=$metric TMP_DIR=.
-	# count reads
-	chrMYCnt=$alnDir/${id}.reads_cnt.$sizeTag.$i.tsv
-	samtools idxstats $subBam >tmp1.$$.txt
-	echo -e "sample\tmappedCnt.all\tmappedCnt.chrM\tmappedCnt.chrY" >$chrMYCnt
-	chrMcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}$1~/^chrM[^\d]?/{s+=$3}END{print s}' )
-	chrYcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}$1~/^chrY[^\d]?/{s+=$3}END{print s}' )
-	allcnt=$( less tmp1.$$.txt | gawk 'BEGIN{s=0}{s+=$3}END{print s}' )
-	echo -e "$id\t$allcnt\t$chrMcnt\t$chrYcnt" >>$chrMYCnt
-	## copy files
-	#aws s3 cp --quiet $subBam $s3dirOut/$subBam
-	#aws s3 cp --quiet $metric $s3dirOut/$metric
-	#aws s3 cp --quiet $chrMYCnt $s3dirOut/$chrMYCnt
-	
-	echo "Step 2 (rep $i): call peaks on $subBam"
-	
-	# filter the bams
-	if [[ $paired ]]; then
-		filter="-f 0x2"
-		format=BAMPE
-	else
-		filter="";
-		format=AUTO
-	fi
-	o=tmp.$$.filtered.bam
-	samtools idxstats $subBam | grep -vP '^(chrM|chrY)' \
-	| gawk 'BEGIN{OFS="\t"}{print $1,0,$2,$1}' >tmp1.$$.bed
-	samtools view -@ $extraCpus -b $filter -F 0x400 -q 30 -L tmp1.$$.bed -o $o $subBam
-	macs2 callpeak -t $o -f $format -g $species --outdir $macsDir -B \
-	-n "$id.$sizeTag.$i" --trackline -q 0.05 --call-summits \
-	--keep-dup all
-done
-
-#aws s3 sync --quiet macs $s3dirOut/macs
-
-# delete all generated files
-#rm -rf $alnDir $macsDir
-rm tmp1.$$.txt tmp1.$$.bed tmp.$$.filtered.bam
-
-#rm tmp1.$$.txt $subBam $metric $chrMYCnt
-
-echo "Results are put in folders $alnDir and $macsDir"
-
-echo Job is done at `date`;
 
 exit 0;
 
