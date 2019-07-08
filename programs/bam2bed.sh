@@ -43,12 +43,14 @@ bam=$1
 out=$2
 
 if [[ $(paired_bam $bam) ]]; then
+        msg "Converting $bam to bed in paired-end mode"
         if [[ $out ]]; then
-                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9}' >$out
+                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}' >$out
         else
-                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9}'
+                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}'
         fi
 else
+        msg "Converting $bam to bed in single-end mode"
         if [[ $out ]]; then
                 bamToBed -i $bam >$out
         else
