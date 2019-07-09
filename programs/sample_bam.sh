@@ -233,7 +233,7 @@ if [[ ! $keepDup ]]; then
 fi
 # count the number of reads before filtering
 readCntOrig=($(count_read_pairs $bam)); # store in an array
-msg "[STAT] In original file: there are ${readCntOrig[1]} reads in ${readCntOrig[0]} pairs"
+echo "[STAT] In original file: there are ${readCntOrig[1]} reads in ${readCntOrig[0]} pairs"
 # index the bam file
 samtools index $bam
 filterParams="";
@@ -267,7 +267,7 @@ fi
 
 # count reads after filtering
 readCntFiltered=($(count_read_pairs $bam)); # store in an array
-msg "[STAT] In filtered file: there are ${readCntFiltered[1]} reads in ${readCntFiltered[0]} pairs"
+echo "[STAT] In filtered file: there are ${readCntFiltered[1]} reads in ${readCntFiltered[0]} pairs"
 # now sub-sample the reads
 
 if [[ $(cmp_num $frac 1 ">") -gt 0 ]]; then
@@ -288,20 +288,20 @@ fi
 
 subfrac=$seed.$frac
 subBam=$outBase.bam
-msg "[STAT] Sampling 0.$frac fraction reads from filtered bam"
+echo "[STAT] Sampling 0.$frac fraction reads from filtered bam"
 samtools view -@ $extraCpus -b -o $subBam -s $subfrac $bam
 msg "Final bam file is generated: $subBam"
 
 # count reads after filtering
 readCntSampled=($(count_read_pairs $subBam)); # store in an array
-msg "[STAT] In sampled file: there are ${readCntSampled[1]} reads in ${readCntSampled[0]} pairs"
+echo "[STAT] In sampled file: there are ${readCntSampled[1]} reads in ${readCntSampled[0]} pairs"
 
 ratio1=$(echo "scale=4; ${readCntFiltered[1]}/${readCntOrig[1]}" | bc -l)
 ratio2=$(echo "scale=4; ${readCntFiltered[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
-msg "The filtered reads/pairs ratio (against the original): $ratio1\t$ratio2"
+echo "The filtered reads/pairs ratio (against the original): $ratio1\t$ratio2"
 ratio1=$(echo "scale=4; ${readCntSampled[1]}/${readCntOrig[1]}" | bc -l)
 ratio2=$(echo "scale=4; ${readCntSampled[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
-msg "The sampled reads/pairs ratio (against the original): $ratio1\t$ratio2"
+echo "The sampled reads/pairs ratio (against the original): $ratio1\t$ratio2"
 
 if [[ ! $keepTmp ]]; then # clean up
 	msg "Removing temporary files"
