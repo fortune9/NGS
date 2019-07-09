@@ -44,11 +44,16 @@ out=$2
 
 if [[ $(paired_bam $bam) ]]; then
         msg "Converting $bam to bed in paired-end mode"
+        # need sort the bam file first
+        tmpBam=tmp.$$.bam
+        samtools sort -n -o $tmpBam $bam
+        bam=$tmpBam
         if [[ $out ]]; then
                 bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}' >$out
         else
                 bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}'
         fi
+        rm $tmpBam
 else
         msg "Converting $bam to bed in single-end mode"
         if [[ $out ]]; then
