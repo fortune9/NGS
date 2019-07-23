@@ -75,15 +75,16 @@ function bam_sorted
 function count_read_pairs
 {
 	bam=$1
-	# check whether all reads in paired mode
+	# check whether all reads in paired mode, even only one end is
+	# mapped
 	unpairedCnt=$(samtools view -c -F 0x1 $bam)
 	if [[ $unpairedCnt -gt 0 ]]; then
-		msg "There are unpaired reads in $bam. can't proceed"
+		msg "There are $unpairedCnt unpaired reads in $bam. can't proceed"
 		exit 4;
 	fi
 	unmappedCnt=$(samtools view -c -f 0x4 $bam)
 	if [[ $unmappedCnt -gt 0 ]]; then
-		msg "There are unmapped reads in $bam. can't proceed"
+		msg "There are $unmappedCnt unmapped reads in $bam. can't proceed"
 		exit 4;
 	fi
 	# get all reads (each name counts only once)
@@ -213,15 +214,17 @@ if [[ ! $outBase ]]; then
 	outBase=$(basename ${bam/%.bam/.sub}).$$
 fi
 
+# if input bam is sorted, sort it first
+if [[ ! $(bam_sorted $bam) ]]; then
+	samtools sort -m $memPerCore -@ $extraCpus -o tmp.$$.bam $bam
+	mv tmp.$$.bam $bam
+	msg "$bam is coordinate-sorted now"
+fi
+
 if [[ ! $keepDup ]]; then
 	msg "Marking and removing PCR duplicates"
 	markedBam=${outBase}.dup_marked.bam
 	metric=${outBase}.dup_metrics.txt
-	if [[ ! $(bam_sorted $bam) ]]; then
-		samtools sort -m $memPerCore -@ $extraCpus -o tmp.$$.bam $bam
-		mv tmp.$$.bam $bam
-		msg "$bam is coordinate-sorted now"
-	fi
 	$picard MarkDuplicates \
 	I=$bam ASO=coordinate M=$metric O=$markedBam \
 	OPTICAL_DUPLICATE_PIXEL_DISTANCE=100 TMP_DIR=. \
@@ -237,6 +240,11 @@ echo "[STAT] In original file: there are ${readCntOrig[1]} reads in ${readCntOri
 # index the bam file
 samtools index $bam
 filterParams="";
+
+if [[ $mapqCut -gt 0 ]]; then
+	msg "Reads with MAPQ < $mapqCut to be removed"
+	filterParams+=" -q $mapqCut"
+fi
 
 if [[ (! $badAlign) && $paired ]]; then
 	msg "Unproperly aligned read pairs to be removed"
@@ -259,7 +267,7 @@ fi
 if [[ $filterParams ]]; then
 	msg "Filter bam with options '$filterParams' "
 	o=tmp.$$.filtered.bam
-	samtools view -@ $extraCpus -b $filterParams -q $mapqCut -o $o $bam
+	samtools view $filterParams -@ $extraCpus -b -o $o $bam
 	bam=$o
 	samtools index $o
 	tmpFiles+=($o $o.bai)
