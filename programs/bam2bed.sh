@@ -27,7 +27,7 @@ function msg
 # test whether a bam file is paired end
 function paired_bam
 {
-        if [[ $( samtools view -f 0x1 $1) ]]; then
+        if [[ $( samtools view -f 0x1 $1 | head -2) ]]; then
                 echo "ok"
         else
                 echo "";
