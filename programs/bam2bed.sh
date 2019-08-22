@@ -49,17 +49,17 @@ if [[ $(paired_bam $bam) ]]; then
         samtools sort -n -o $tmpBam $bam
         bam=$tmpBam
         if [[ $out ]]; then
-                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}' >$out
+                samtools view -F 0x4 -u $bam | bamToBed -bedpe -i - | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}' >$out
         else
-                bamToBed -bedpe -i $bam | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}'
+                samtools view -F 0x4 -u $bam | bamToBed -bedpe -i - | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$7,$8,$9 "/" $10}'
         fi
         rm $tmpBam
 else
         msg "Converting $bam to bed in single-end mode"
         if [[ $out ]]; then
-                bamToBed -i $bam >$out
+                samtools view -F 0x4 -u $bam | bamToBed -i - >$out
         else
-                bamToBed -i $bam
+                samtools view -F 0x4 -u $bam | bamToBed -i -
         fi
 fi
 
