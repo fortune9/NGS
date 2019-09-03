@@ -1,6 +1,12 @@
 # This file contains common NGS functions and can be sourced into
 # other bash files.
 
+function rand_str
+{
+	len=${1:-8}; # string length
+	echo $(head -10 /dev/urandom | tr -dc '0-9a-zA-Z' | fold -w $len | head -1)
+}
+
 ## testing bam files
 function is_bam_paired
 {
@@ -43,5 +49,20 @@ function count_read_pairs
         single=$(samtools view -c -F 0x100 -f 0x8 $bam)
         nPairs=$(echo "scale=0; ($nReads-$single)/2+$single" | bc -l) # each pair counted only once
         echo "$nPairs $nReads"
+}
+
+# sort a bam file
+function sort_bam
+{
+	bam=$1;
+	byName=$2;
+
+	out="tmp.$$.$(rand_str).sorted.bam"
+	opts="-o $out";
+	if [[ $byName ]]; then
+		opts+=" -n"
+	fi
+	samtools sort $opts $bam
+	echo $out
 }
 
