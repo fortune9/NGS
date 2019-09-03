@@ -413,8 +413,12 @@ if [[ "$paired" ]]; then
 	fi
 	fqs="-1 $fq1 -2 $fq2"
 else
-	msg "Single-end alignment has not implemented yet"
-	exit 5;
+	fq1=$trimOut/${sampleId}_trimmed.fq.gz;
+	if [[ ! -f $fq1 ]]; then
+		warn "Trimmed fastq file '$fq1' can't be found"
+		exit 5;
+	fi
+	fqs="-U $fq1"
 fi
 
 commOpts="$bowtieParams -p $alnCores"
