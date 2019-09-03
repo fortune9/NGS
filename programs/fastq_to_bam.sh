@@ -104,8 +104,8 @@ Options (default values are in []):
 
 -h|--help:  show this usage message.
 
---sample-id: sample id, used for naming all output files. 
-    [string matching /^[a-zA-Z0-9]+/ in input filename ]
+--sample-id: sample id, used for naming all output files.
+    [string matching /^[a-zA-Z0-9_]+/ in input filename ]
 
 --trim-galore: the path to program 'trim_galore'. [trim_galore]
 
@@ -344,7 +344,7 @@ fi
 if [[ ! "$sampleId" ]]; then
 	# get default sample Id
 	f=$(basename $fq1)
-	[[ $f =~ ^([a-zA-Z0-9]+) ]];
+	[[ $f =~ ^([a-zA-Z0-9_]+) ]];
 	sampleId=${BASH_REMATCH[1]}
 	msg "Set sample id to '$sampleId'"
 fi
