@@ -27,6 +27,16 @@ function is_bam_sorted
         fi
 }
 
+function is_bam_dupmarked
+{
+	cnt=$(samtools view $1 | head -10000 | grep 'PG:Z:MarkDuplicates' | wc -l)
+	if [[ $cnt -gt 0 ]]; then
+		echo "MK";
+	else
+		echo "";
+	fi
+}
+
 ## summarizing bams
 # count the number of read pairs as well reads in a bam file
 function count_read_pairs
