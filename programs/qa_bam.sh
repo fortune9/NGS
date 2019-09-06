@@ -53,8 +53,9 @@ be quoted, and check 'samtools view' for other filter options. []
 
 ** libcomplex options **
 
---excl-chrs <string>: the chromosomes to exclude, in the format like
-'chr1,chr2'. []
+--chrs <string>: in addition to the metrics for the bam file overall,
+the total and unique reads for these chromosomes will also be
+separately output. The format should be like 'chr1,chr2'. []
 
 Example uses:
 
@@ -67,13 +68,13 @@ $0 --skip 3 test.bam
 $0 --bam-filter '-q 30 -f 0x2' --out test_qa.txt test.bam
 
 ## exclude chromosome chrM
-$0 --out test_qa.txt --excl-chrs 'chrM' test.bam
+$0 --out test_qa.txt --chrs 'chrM' test.bam
 
 ## run the ENCODE ATAC-seq pipeline command for single-end reads
-$0 --out test_qa.txt --excl-chrs 'chrM' --bam-filter '-F 1804' test.bam
+$0 --out test_qa.txt --chrs 'chrM' --bam-filter '-F 1804' test.bam
 
 ## run the ENCODE ATAC-seq pipeline command for paired-end reads
-$0 --out test_qa.txt --excl-chrs 'chrM' --bam-filter '-F 1804 -f 2' test.bam
+$0 --out test_qa.txt --chrs 'chrM' --bam-filter '-F 1804 -f 2' test.bam
 
 EOF
 
@@ -109,6 +110,78 @@ function set_skipped_steps
 	echo "${skipped[@]}"
 }
 
+# get read statistics from a bam, including duplication,
+# chromosome-specific reads
+function bam_stat
+{
+	bam=$1;
+	filter=$2;
+	chrs=$3;
+	printHead=$4;
+
+	tempBed=tmp.$$.b2b.bed
+	if [[ $paired ]]; then
+	#	tmpBam=$(sort_bam $bam "T")
+	#	mv $tmpBam $bam
+		#samtools view $bamFilter -u $bam | bamToBed \
+		samtools view -u $filter $bam | bamToBed \
+		-bedpe | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$9 "/" $10}' \
+		>$tempBed
+	else # single-end
+		#samtools view $bamFilter -u $bam | bamToBed \
+		samtools view -u $filter $bam | bamToBed \
+		 | gawk 'BEGIN{OFS="\t"}{print $1,$2,$3,$6}' \
+		>$tempBed
+	fi
+	# print out header if true
+	if [[ $printHead ]]; then
+		header="#total_read_pairs\tdistinct_read_pairs\tnondup_read_pairs\ttwice_read_pairs\tNRF\tPBC1\tPBC2"
+		for c in $(str_split "," $chrs)
+		do
+			header+="\t$c";
+			header+="\t${c}Uniq";
+		done
+		echo -e "$header"
+	fi
+	# calculate now
+	sort $tempBed | uniq -c | perl -e '
+	$chrs=shift; # chromosomes to check
+	$mt=$m0=$m1=$m2=0;
+	while(<>) {
+		@fields=split /\s+/;
+		$cnt=$fields[1];
+		$unique=$cnt==1?1:0;
+		$mt+=$cnt; # total reads
+		$m0++; # distinct reads
+		$m1++ if $unique; # unique reds
+		$m2++ if $fields[1]==2; # twice reads
+		if($chrs=~/$fields[2](,|$)/) { # matching chromosomes
+			$chr=$fields[2];
+			${$chr}+=$cnt; # total for this chrom
+			if($unique) {
+				$var="$chr"."Uniq"; # unique ones for this chrom
+				${$var}++; 
+			} 
+		} 
+	}
+	# output the summary
+	$nrf=sprintf("%.6f", $m0/$mt);
+	$pbc1=$m0>0? sprintf("%.6f",$m1/$m0):"NA";
+	$pbc2=$m2>0? sprintf("%.6f",$m1/$m2):"NA";
+	$chrInfo="";
+	foreach (split /,/, $chrs)
+	{
+		$varT=$_;
+		$varU=$_."Uniq";
+		$chrInfo.="\t".(${$varT}||0)."\t".(${$varU}||0);
+	}
+	$chrInfo =~ s/^\t//;
+	print join("\t", $mt, $m0, $m1, $m2, 
+	$nrf, $pbc1, $pbc2, $chrInfo), "\n";
+	' $chrs
+	rm $tempBed;
+}
+
 # the order here MUST be the same as the those in usage description
 steps=(markdup flagstat libcompex)
 
@@ -131,7 +204,7 @@ do
 			bamFilter=$1;
 			shift;
 			;;
-		--excl-chrs)
+		--chrs)
 			exclChrs=$1;
 			shift;
 			;;
@@ -215,6 +288,7 @@ if [[ $bamFilter ]]; then
 	msg "Filtering bam file $bam into $filteredBam"
 	samtools view $bamFilter -b -o $filteredBam $bam
 	bam=$filteredBam
+	echo "# Bam file is filtered with '$bamFilter'" >>$outFile
 fi
 
 stepI=$(( stepI + 1 ))
@@ -241,25 +315,23 @@ echo ">>Step $step" >>$outFile
 if [[ ${skippedSteps[$step]} ]]; then
 	msg "Step $step is skipped"
 else
-	tempFile=libcomplex.$(rand_str).txt
+	# sort bam if in paired-end
 	if [[ $paired ]]; then
 		tmpBam=$(sort_bam $bam "T")
 		mv $tmpBam $bam
-		#samtools view $bamFilter -u $bam | bamToBed \
-		bamToBed -i $bam \
-		-bedpe | gawk 'BEGIN{OFS="\t"}$1==$4{print $1,$2,$6,$9 "/" $10}' \
-		| gawk -v chrs=$exclChrs 'BEGIN{FS="\t"} chrs !~ $1","' \
-		| sort | uniq -c | gawk '{print $1}' | sort | uniq -c \
-		>$tempFile
-	else # single-end
-		#samtools view $bamFilter -u $bam | bamToBed \
-		bamToBed -i $bam \
-		 | gawk 'BEGIN{OFS="\t"}{print $1,$2,$3,$6}' \
-		| gawk -v chrs=$exclChrs 'BEGIN{FS="\t"} chrs !~ $1","' \
-		| sort | uniq -c | gawk '{print $1}' | sort | uniq -c \
-		>$tempFile
 	fi
-	# calculate now
+	bam_stat $bam "" $exclChrs "T" >>$outFile;
+	mapqCut=30
+	echo "# MAPQ > $mapqCut" >>$outFile;
+	bam_stat $bam "-q $mapqCut" $exclChrs >>$outFile;
+fi
+
+clean_up;
+
+msg "Job done at `date`";
+
+exit 0;
+
 	echo -e	"#total_read_pairs\tdistinct_read_pairs\tnondup_read_pairs\ttwice_read_pairs\tNRF\tPBC1\tPBC2" >>$outFile
 	echo 
 	gawk 'BEGIN{mt=0;m0=0;m1=0;m2=0}
