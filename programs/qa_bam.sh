@@ -139,6 +139,7 @@ function bam_stat
 		for c in $(str_split "," $chrs)
 		do
 			header+="\t$c";
+			header+="\t${c}Distinct";
 			header+="\t${c}Uniq";
 		done
 		echo -e "$header"
@@ -158,6 +159,8 @@ function bam_stat
 		if($chrs=~/$fields[2](,|$)/) { # matching chromosomes
 			$chr=$fields[2];
 			${$chr}+=$cnt; # total for this chrom
+			$var="$chr"."Dist"; # distinct reads, collapsed duplicates
+			${$var}++; 
 			if($unique) {
 				$var="$chr"."Uniq"; # unique ones for this chrom
 				${$var}++; 
@@ -172,8 +175,9 @@ function bam_stat
 	foreach (split /,/, $chrs)
 	{
 		$varT=$_;
+		$varD=$_."Dist";
 		$varU=$_."Uniq";
-		$chrInfo.="\t".(${$varT}||0)."\t".(${$varU}||0);
+		$chrInfo.="\t".(${$varT}||0)."\t".(${$varD}||0)."\t".(${$varU}||0);
 	}
 	$chrInfo =~ s/^\t//;
 	print join("\t", $mt, $m0, $m1, $m2, 
