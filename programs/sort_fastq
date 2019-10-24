@@ -1,0 +1,84 @@
+#!/bin/bash
+
+set -e
+
+tmpFile=tmp.func.$$.sh
+funcUrl='https://raw.githubusercontent.com/fortune9/programs/master/bash_functions.sh'
+
+wget --quiet -O $tmpFile $funcUrl
+
+if [[ -f $tmpFile ]]; then
+	source $tmpFile
+	rm $tmpFile
+else
+	msg "Can't reach file 'bash_functions.sh' from github"
+	exit 2;
+fi
+
+## functions
+function usage()
+{
+	cat <<EOF
+$0 [options] <fastq.gz>
+
+This program sorts fastq reads according to their read names.
+
+Options (default values are in []):
+
+-o|--outfile: <path> the file to store sorted results [/dev/stdout].
+
+Example uses:
+
+$0 test1.fq.gz | gzip -c >test1.sorted.fq.gz
+
+EOF
+
+}
+
+if [[ $# -lt 1 ]]; then
+	usage;
+	exit 1;
+fi
+
+posArgs=();
+outFile=/dev/stdout
+
+while [[ $# -gt 0 ]];
+do
+	k=$1;
+	shift;
+	case $k in
+		-h|--help)
+			usage;
+			exit 1;
+			;;
+		-o|--outfile)
+			outFile=$1;
+			shift;
+			;;
+		*)
+			posArgs+=($k);
+			;;
+	esac
+
+done
+
+#echo ${posArgs[@]}
+
+if [[ ${#posArgs[@]} -lt 1 ]]; then
+	usage;
+	exit 1;
+fi
+
+inFile=${posArgs[0]}
+
+msg "Start sorting '$inFile'"
+
+less $inFile | gawk \
+'/^@/{r=$0;i=0; while(i<3) {getline newline; r=r "|" newline; i++;} print r}' \
+| sort -k 1,1 -t " " | tr '|' '\n' >$outFile
+
+msg "Job is done at `date`"
+
+exit 0;
+
