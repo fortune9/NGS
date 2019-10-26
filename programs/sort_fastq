@@ -21,15 +21,24 @@ function usage()
 	cat <<EOF
 $0 [options] <fastq.gz>
 
-This program sorts fastq reads according to their read names.
+This program sorts fastq reads according to their read names, by
+wrapping the Linux 'sort' command.
 
 Options (default values are in []):
 
 -o|--outfile: <path> the file to store sorted results [/dev/stdout].
 
-Example uses:
+--sort-opt: <string> options to the Linux 'sort' command, put in
+quotes, such as "-g -T ./"
 
+Example uses:
+# default sort
 $0 test1.fq.gz | gzip -c >test1.sorted.fq.gz
+
+# sort according to numeric values and use current folder as temporary
+# folder
+$0 --sort-opt '-n -T .' test1.fq.gz | gzip -c >test1.sorted.fq.gz
+
 
 EOF
 
@@ -42,6 +51,7 @@ fi
 
 posArgs=();
 outFile=/dev/stdout
+sortOpts="";
 
 while [[ $# -gt 0 ]];
 do
@@ -54,6 +64,10 @@ do
 			;;
 		-o|--outfile)
 			outFile=$1;
+			shift;
+			;;
+		--sort-opt)
+			sortOpts=$1;
 			shift;
 			;;
 		*)
@@ -76,7 +90,7 @@ msg "Start sorting '$inFile'"
 
 less $inFile | gawk \
 '/^@/{r=$0;i=0; while(i<3) {getline newline; r=r "|" newline; i++;} print r}' \
-| sort -k 1,1 -t " " | tr '|' '\n' >$outFile
+| sort $sortOpts -k 1,1 -t " " | tr '|' '\n' >$outFile
 
 msg "Job is done at `date`"
 
