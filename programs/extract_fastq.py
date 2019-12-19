@@ -29,7 +29,7 @@ def id_from_file():
         id=nameFh.readline();
         if id == '': # no more ids
             break;
-        yield id.strip();
+        yield id.strip().split()[0]; # get the first field only
 
 def target_ids():
     '''
@@ -154,6 +154,7 @@ o=open(args.outFile,"w") if args.outFile != sys.stdout else args.outFile;
 ids=target_ids(); # a generator
 
 counter=0;
+skipped=0;
 for id in ids:
     #print("Searching for {0}".format(id), file=sys.stderr);
     counter+=1;
@@ -163,11 +164,11 @@ for id in ids:
             o.write("".join(fqRead[1:])); recorded=True;
             break; # get a new id and new read
         elif id < fqRead[0]: # this id has no read
-            print("[{0}] The read '{1}' has no read in input fastq".
-                    format(self, id), file=sys.stderr);
+            #print("[{0}] The read '{1}' has no read in input fastq".
+            #        format(self, id), file=sys.stderr);
             # get new id and test
             while id < fqRead[0]:
-                warn(f"Skipping id {id}");
+                warn(f"Skipping id {id}"); skipped+=1;
                 id=next(ids);
                 counter+=1;
                 report_progress();
@@ -178,6 +179,7 @@ for id in ids:
         # for outer elif: otherwise for greater id, waiting for next read
     if not recorded:
         warn(f"Skipping id {id}"); # this can be last greater id without read
+        skipped+=1;
     report_progress();
 
 if nameFh is not None:
@@ -187,7 +189,8 @@ i.close();
 if o != sys.stdout:
     o.close();
 
-warn("Job is done at {0}".format(datetime.now()));
+warn("Job is done at {0}\n{1} total ids\n{2} skipped".format(
+        datetime.now(), counter, skipped));
 
 sys.exit(0);
 
