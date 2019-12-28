@@ -22,7 +22,8 @@ function usage()
 $0 [options] <fastq.gz>
 
 This program sorts fastq reads according to their read names, by
-wrapping the Linux 'sort' command.
+wrapping the Linux 'sort' command. The input file can be in plain
+format or gzipped.
 
 Options (default values are in []):
 
@@ -88,9 +89,21 @@ inFile=${posArgs[0]}
 
 msg "Start sorting '$inFile'"
 
-less $inFile | gawk \
-'/^@/{r=$0;i=0; while(i<3) {getline newline; r=r "|" newline; i++;} print r}' \
-| sort $sortOpts -k 1,1 -t " " | tr '|' '\n' >$outFile
+#less $inFile | gawk \
+#'/^@/{r=$0;i=0; while(i<3) {getline newline; r=r "|" newline; i++;} print r}' \
+
+reader="";
+
+if [[ $inFile =~ \.gz ]]; then
+	warn "Input file '$inFile' is detected in gzipped format"
+	reader="gzip -dc"
+else
+	warn "Input file '$inFile' is processed in plain format"
+	reader="cat"
+fi
+
+$reader $inFile | paste -d'|' - - - - \
+	| sort $sortOpts -k 1,1 -t " " | tr '|' '\n' >$outFile
 
 msg "Job is done at `date`"
 
