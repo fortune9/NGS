@@ -103,7 +103,7 @@ else
 fi
 
 $reader $inFile | paste -d'|' - - - - \
-	| sort $sortOpts -k 1,1 -t " " | tr '|' '\n' >$outFile
+	| LC_ALL=C sort $sortOpts -k 1,1 -t " " | tr '|' '\n' >$outFile
 
 msg "Job is done at `date`"
 
