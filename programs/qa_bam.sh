@@ -102,8 +102,8 @@ function set_skipped_steps
 	for s in ${skipped[@]}
 	do
 		if [[ $s =~ ^[0-9]+$ ]]; then
-			j=$(( $s - 1 ));
-			skipped[$i]=${steps[$j]}; # convert number to step names
+			#j=$(( $s - 1 ));
+			skipped[$i]=${steps[$s]}; # convert number to step names
 		fi
 		i=$(( i + 1 ));
 	done
@@ -187,7 +187,7 @@ function bam_stat
 }
 
 # the order here MUST be the same as the those in usage description
-steps=(markdup flagstat libcompex)
+steps=("" markdup flagstat libcomplex); # "" is used as placeholder
 
 skips=""
 bamFilter=""
@@ -243,12 +243,16 @@ done
 declare -A skippedSteps
 tmp=($(set_skipped_steps $skips))
 #echo "input: $skips >> ${tmp[@]}"
+#exit 11;
+
 for s in ${tmp[@]}
 do
 #	echo $s
 	skippedSteps[$s]=1; # add to an associate array
 done
-#echo "Skipped steps are: '${!skippedSteps[@]}'"
+msg "Skipped steps are: '${!skippedSteps[@]}'"
+#echo "Skipped steps are: '${skippedSteps[@]}'"
+#exit 11;
 
 # preprocess the string containing excluded chromosomes
 exclChrs=$(echo $exclChrs | sed -e 's/ //g') # remove spaces
