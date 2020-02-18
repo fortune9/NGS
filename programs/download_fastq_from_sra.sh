@@ -6,14 +6,21 @@ if [[ $# -lt 1 ]]; then
 	cat << EOF
 Usage: $0 <SRR run-id> [<other fastq-dump options>]
 
-This program is a wrapper of fastq-dump in SRA-toolkit, with the
-following options are added by default:
+This program is a wrapper of fastq-dump and fasterq-dump (if installed)
+in SRA-toolkit, with the following options are added by default:
 
---gzip
---read-filter pass
+For fastq-dump,
+
 --skip-technical
 --split-3
+--gzip
+--read-filter pass
 --clip
+
+For fasterq-dump,
+
+--skip-technical
+--split-3
 
 These default options are good for fetching paired-end sequences. If
 not desired, one can specify desired parameters after NCBI SRR id; in
@@ -39,7 +46,9 @@ if [[ $(command -v fasterq-dump) ]]; then
 	ncores=`nproc`
 	dump="fasterq-dump --threads $ncores"
 else
-	options+=" --gzip --read-filter pass --clip"
+	if [[ $2 == '' ]]; then
+		options+=" --gzip --read-filter pass --clip"
+	fi
 fi
 
 cmd="$dump $options $1"
