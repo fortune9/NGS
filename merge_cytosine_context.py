@@ -17,10 +17,13 @@ def open_file(f):
     '''
     open a file
     '''
-    openMethod=open;
-    if re.search("\\.gz$", f, re.IGNORECASE):
-        openMethod=gzip.open;
-    h=openMethod(f,"rt");
+    if f == "-":
+        h=sys.stdin;
+    else:
+        openMethod=open;
+        if re.search("\\.gz$", f, re.IGNORECASE):
+            openMethod=gzip.open;
+        h=openMethod(f,"rt");
     hObj={ "handle": h,
             "stacked": [],
             "eof": False};
@@ -54,6 +57,7 @@ def in_same_context(rec1, rec2):
         return False;
     if rec1[chrCol] != rec2[chrCol]: # different chromosomes
         return False;
+    # check distance between the two Cs
     if abs(int(rec1[posCol])-int(rec2[posCol])) != contextWidth:
         return False;
     return True;
@@ -61,11 +65,15 @@ def in_same_context(rec1, rec2):
 desc='''
 
 This program merges the cytosines from the + and - strands in the same
-CpG or CHG context into one, so two lines in an input file will be
-output as one line.
+CpG or CHG context into one, so only one of the two lines for a context
+will be output. 
 
-The program can also handle the cases where the input file contains
-both merged (one line per CpG/CHG) and unmerged (two lines) cytosines.
+In future, we will also consider to merge the value columns.
+
+Note: the program can also handle the cases where the input file contains
+both merged (one line per CpG/CHG) and unmerged (two lines) cytosines,
+but can't handle cases of mixing different cytosine contexts.
+
 
 Options:
 
@@ -96,7 +104,7 @@ op.add_argument("--sep",
         );
 
 op.add_argument("inFile",
-        help="input file"
+        help="input file. Use '-' for standard input"
         );
 
 args=op.parse_args();
@@ -108,6 +116,8 @@ sep=args.sep;
 chrCol=0;
 posCol=1;
 strandCol=2;
+## End of global variables
+
 if cType == "CpG":
     contextWidth=1;
 elif cType == "CHG":
@@ -131,14 +141,16 @@ while True:
     if lastRecord is None:
         lastRecord=fields;
         continue;
-    # other check whether in the same context
+    # otherwise check whether in the same context
     if fields[strandCol] == "-":
+        # check whether in the same context
         if in_same_context(lastRecord,fields):
+            # output last + record and ignore this - record
             output_record();
         else: # not in the same context
             output_record();
             lastRecord=fields;
-    else: # + strand, new context
+    else: # + strand, always new context
         output_record();
         lastRecord=fields;
 
