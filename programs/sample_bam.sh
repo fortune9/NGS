@@ -2,8 +2,6 @@
 
 set -e
 
-s3dirIn=s3://zymo-filesystem/home/zzhang/work-partition/ATAC-seq/Analysis/in1408
-s3dirOut=s3://zymo-filesystem/home/zzhang/work-partition/ATAC-seq/Analysis/in1408
 #tg=/home/ec2-user/tools/extra/tmp-work/TrimGalore-0.6.1/trim_galore
 #bowtie_index=/home/ec2-user/tools/extra/tmp-work/bowtie2_index/hg38.no_alt/hg38
 
@@ -17,17 +15,20 @@ function usage
 	cat <<EOF
 Usage: $0 [options] <bamFile>  
 
-E.g.: $0 -o test_out -f 0.1 --paired test.bam # 10% reads
-E.g.: $0 -o test_out -f 100 --paired test.bam # 100 reads, or 50 pairs
+Examples:
+# sample 10% of input reads
+$0 -o test_out -f 0.1 --paired test.bam
+# sample 100 reads in a paired-end mode, i.e., 50 read pairs
+E.g.: $0 -o test_out -f 100 --paired test.bam
+# the same as above, but read from AWS S3
+E.g.: $0 -o test_out -f 100 --paired s3://bucket1/to/test.bam
 
 This program reads a bam file, remove duplicates, filter properly
 aligned read pairs (paired-end mode only), and sample a specified
-number of reads from it. Optionally, it can also remove chrM and chrY
-reads.
+number of reads from it. Optionally, it can also remove reads from
+chromosomes chrM and chrY.
 
-For paired-end bam, if option --frac is fed with a number greater than
-1, then this number is regarded as the number of reads, not read
-pairs, so a number 1000 means 500 read pairs.
+Input bam file can be local or at AWS S3.
 
 options:
 
@@ -35,7 +36,8 @@ options:
 --paired:   reads in the bam are in paired-end. Default is single-end.
 -f/--frac:  the fraction of reads sampled from input bam. If greater
             than 1, the parameter is assumed as the absolute number of reads
-            required. 1 means no sampling [1].
+            to sample; in paired-end mode, if one wants to sample
+            n read pairs, he need specify 2*n. 1 means no sampling.  [1].
 -d/--keep-dup: if provided, reads from PCR/optical duplicates will be
             retained
 -b/--bad-aligned: if provided, unproperly aligned paired-end reads
@@ -60,6 +62,28 @@ function msg
 	echo -e "$*" >&2;
 }
 
+# get the file if they are located remotely
+# parameters: input file, the variable name to store new file
+function get_file() {
+    f=$1
+    if [[ $f =~ ^s3://. ]]; then
+        newF=$(basename $f)
+        echo "Downloading $f"
+        aws s3 cp --quiet $f $newF && \
+            echo "Downloading $f is successful"
+        s3dir=$(dirname $f)
+        eval "$2=$newF"
+        tmpFiles+=($newF)
+    fi
+}
+
+# upload file to s3
+# parameters: the name of a file to upload
+function upload_file() {
+    aws s3 cp --quiet $1 $s3dir/$1 && \
+        echo "Uploading $1 to $s3dir/$1 is successful"
+}
+
 # check whether a bam is coordinate sorted
 function bam_sorted
 {
@@ -75,21 +99,22 @@ function bam_sorted
 function count_read_pairs
 {
 	bam=$1
+    nCpus=${2:-0}
 	# check whether all reads in paired mode, even only one end is
 	# mapped
-	unpairedCnt=$(samtools view -c -F 0x1 $bam)
+	unpairedCnt=$(samtools view -c -F 0x1 -@ $nCpus $bam)
 	if [[ $unpairedCnt -gt 0 ]]; then
 		msg "There are $unpairedCnt unpaired reads in $bam. can't proceed"
 		exit 4;
 	fi
-	unmappedCnt=$(samtools view -c -f 0x4 $bam)
+	unmappedCnt=$(samtools view -c -f 0x4 -@ $nCpus $bam)
 	if [[ $unmappedCnt -gt 0 ]]; then
 		msg "There are $unmappedCnt unmapped reads in $bam. can't proceed"
 		exit 4;
 	fi
 	# get all reads (each name counts only once)
-	nReads=$(samtools view -c -F 0x100 $bam)
-	single=$(samtools view -c -F 0x100 -f 0x8 $bam)
+	nReads=$(samtools view -c -F 0x100 -@ $nCpus $bam)
+	single=$(samtools view -c -F 0x100 -f 0x8 -@ $nCpus $bam)
 	nPairs=$(echo "scale=0; ($nReads-$single)/2+$single" | bc -l) # each pair counted only once
 	echo "$nPairs $nReads"
 }
@@ -120,6 +145,18 @@ function cmp_num()
 	else
 		echo ""
 	fi
+}
+
+function delete_files() {
+    for f in "$@"
+    do
+        if [[ -e "$f" ]]; then
+            echo Deleting "$f"
+            rm "$f"
+        else
+            echo "$f doesn't exist"
+        fi
+    done
 }
 
 if [[ $# -lt 1 ]]; then
@@ -202,11 +239,13 @@ done
 
 set -- "${posArgs[@]}"
 bam=$1;
+s3dir=""
+tmpFiles=();
+get_file $bam bam
 ## globals
 ncores=`nproc`
 extraCpus=$(( ncores - 1))
 memPerCore=2G
-tmpFiles=();
 seed=$$;
 
 # set default outbase
@@ -214,7 +253,9 @@ if [[ ! $outBase ]]; then
 	outBase=$(basename ${bam/%.bam/.sub}).$$
 fi
 
-# if input bam is sorted, sort it first
+mkdir -p $(dirname $outBase)
+
+# if input bam is not sorted, sort it first
 if [[ ! $(bam_sorted $bam) ]]; then
 	samtools sort -m $memPerCore -@ $extraCpus -o tmp.$$.bam $bam
 	mv tmp.$$.bam $bam
@@ -232,13 +273,14 @@ if [[ ! $keepDup ]]; then
 	#aws s3 cp --quiet $markedBam $s3dirOut/$markedBam
 	#aws s3 cp --quiet $metric $s3dirOut/$metric
 	bam=$markedBam
-	tmpFiles+=($markedBam $markedBam.bai);
+	tmpFiles+=($markedBam);
 fi
 # count the number of reads before filtering
-readCntOrig=($(count_read_pairs $bam)); # store in an array
+readCntOrig=($(count_read_pairs $bam $extraCpus)); # store in an array
 echo "[STAT] In original file: there are ${readCntOrig[1]} reads in ${readCntOrig[0]} pairs"
 # index the bam file
-samtools index $bam
+samtools index -@ $extraCpus $bam
+tmpFiles+=($bam.bai)
 filterParams="";
 
 if [[ $mapqCut -gt 0 ]]; then
@@ -274,7 +316,7 @@ if [[ $filterParams ]]; then
 fi
 
 # count reads after filtering
-readCntFiltered=($(count_read_pairs $bam)); # store in an array
+readCntFiltered=($(count_read_pairs $bam $extraCpus)); # store in an array
 echo "[STAT] In filtered file: there are ${readCntFiltered[1]} reads in ${readCntFiltered[0]} pairs"
 # now sub-sample the reads
 
@@ -301,19 +343,27 @@ samtools view -@ $extraCpus -b -o $subBam -s $subfrac $bam
 msg "Final bam file is generated: $subBam"
 
 # count reads after filtering
-readCntSampled=($(count_read_pairs $subBam)); # store in an array
+readCntSampled=($(count_read_pairs $subBam $extraCpus)); # store in an array
 echo "[STAT] In sampled file: there are ${readCntSampled[1]} reads in ${readCntSampled[0]} pairs"
 
 ratio1=$(echo "scale=4; ${readCntFiltered[1]}/${readCntOrig[1]}" | bc -l)
 ratio2=$(echo "scale=4; ${readCntFiltered[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
-echo "The filtered reads/pairs ratio (against the original): $ratio1\t$ratio2"
+echo -e "The filtered reads/pairs ratio (against the original): $ratio1\t$ratio2"
 ratio1=$(echo "scale=4; ${readCntSampled[1]}/${readCntOrig[1]}" | bc -l)
 ratio2=$(echo "scale=4; ${readCntSampled[0]}/${readCntOrig[0]}" | bc -l) # pairs ratio
-echo "The sampled reads/pairs ratio (against the original): $ratio1\t$ratio2"
+echo -e "The sampled reads/pairs ratio (against the original): $ratio1\t$ratio2"
 
 if [[ ! $keepTmp ]] && [[ ${#tmpFiles[@]} -gt 0 ]]; then # clean up
 	msg "Removing temporary files"
-	rm "${tmpFiles[@]}"
+    delete_files "${tmpFiles[@]}"
+fi
+
+if [[ "$s3dir" ]]; then
+    upload_file $subBam
+    # remove the middle files
+    if [[ ! $keepTmp ]]; then
+        delete_files $subBam
+    fi
 fi
 
 msg "Job is done at `date`"
