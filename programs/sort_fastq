@@ -2,6 +2,8 @@
 
 set -e
 
+VERSION=0.0.1
+
 tmpFile=tmp.func.$$.sh
 funcUrl='https://raw.githubusercontent.com/fortune9/programs/master/bash_functions.sh'
 
@@ -31,6 +33,8 @@ Options (default values are in []):
 
 --sort-opt: <string> options to the Linux 'sort' command, put in
 quotes, such as "-g -T ./"
+
+--version: print out version number
 
 Example uses:
 # default sort
@@ -71,6 +75,10 @@ do
 			sortOpts=$1;
 			shift;
 			;;
+        -v|--version)
+            echo $VERSION;
+            exit 0;
+            ;;
 		*)
 			posArgs+=($k);
 			;;
